@@ -5,8 +5,7 @@ My Data Science portolio linked on my CV.
 
 As an avid gameshow watcher, particularly The Chase on ITV I sought out to find a dataset related to the gameshow. I was able to find a dataset regarding the contestants on the Israeli version of the show I performed extensive data analysis and was able to make some interesting graphs regarding the behaviour of the players.
 
-<img src="/images/chaselogo.jpg" width="300" height="100">
-<img src="/images/chaseisrael.jpg" width="300" height="300">
+![](/images/chaseisrael.jpg)
 
 # [Project 2: Epitope and amino acid analysis](https://github.com/kingy434/Sam-portfolio/tree/main/epitope)
 
