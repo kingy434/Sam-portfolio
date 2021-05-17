@@ -5,6 +5,9 @@ My Data Science portolio linked on my CV.
 
 As an avid gameshow watcher, particularly The Chase on ITV I sought out to find a dataset related to the gameshow. I was able to find a dataset regarding the contestants on the Israeli version of the show I performed extensive data analysis and was able to make some interesting graphs regarding the behaviour of the players.
 
+![](/images/chaselogo.jpg)
+![](/images/chaseisrael.jpg)
+
 # [Project 2: Epitope and amino acid analysis](https://github.com/kingy434/Sam-portfolio/tree/main/epitope)
 
 My first full project I completed in R for my Master's degree module. Looked at trends within amino acid sequences of epitope strengths Extensive data analysis performed expanding the data set to make new features. Built a classification model with only 60% accuracy, although due to the size of the dataset a more powerful computer would have allowed me to achieve greater accuracy by tuning the parameters.
