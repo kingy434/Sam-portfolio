@@ -1,0 +1,234 @@
+---
+title: "Epitope and protein analysis"
+output: html_document
+---
+This project is an investigation into various properties of amino acids in epitope sequences. There are two datasets provided that will be used to extract useful information. We have csvs for epitopes and proteins. For now they will be put into two separate data frames.
+```{r}
+#load dataframes
+df1 = read.csv("Ov_epitopes.csv")
+df2 = read.csv("proteins.csv")
+```
+Now that we have loaded the data we will now merge the two data frames using the relevant ID columns, namely protein_id and UID. This will connect the two datasets and remove any entries that are not in both. 
+```{r}
+#merge data using ID columns
+mydata = merge(df1, df2, by.x = "protein_id", by.y = "UID")
+```
+By not including all of the data, this function will also remove the NAN entries that are not helpful to our analysis. We can now look at a summary of our data to have a brief overview of the behaviour of each variable.
+```{r}
+summary(mydata)
+```
+There is a mix of numeric and character data here because of the protein strings and associated values. In order to successfully utilise this data set it needs to be cleaned and we will do this by filtering. This will allow us later to be able to make the amino acid windows later on which is why the start and end positions are filtered. We also verify that the start and end positions point to the correct substring. Lastly, the letters B, J, X, Z are not amino acids so will also be removed.
+```{r}
+library(dplyr)
+library(stringr)
+
+#uses dplyr's filter to say the conditions we want our data to satisfy
+mydata = mydata %>% filter(identical(str_sub(TSeq_sequence, start_pos, end_pos), epit_seq) == TRUE &
+                           start_pos >= 8 &
+                           end_pos <= TSeq_length - 8 &
+                           #this uses a regular expression for the letters   
+                           !str_detect(epit_seq, "[BJXZ]"))
+```
+The target variable that will be used is the Class variable with values of 1 or -1 indicating whether or not there is a higher number of positive assays than negative assays. This can be made easily using a list comprehension.
+```{r}
+library(comprehenr)
+
+#list comprehension to create Class variable
+mydata$Class = to_vec(for(i in 1:nrow(mydata)) if(mydata$n_Positive[i] >= mydata$n_Negative[i]) 1 else -1)
+```
+We can now start to look at some visualisations of our cleaned data to see any trends that may occur. To start with we'll look at the distribution of the newly created Class variable.
+```{r fig.align = 'center'}
+library(ggplot2)
+
+#creates plot object, needed to use factor() as it gives -1, 0, 1 otherwise
+d = ggplot(mydata, aes(factor(Class)))
+d + geom_bar() + 
+    ggtitle('Frequency of Each Class') + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Class")
+```
+It can be seen that the distribution of of the two classes is fairly equal, with there being slightly more instances of class 1 than -1. This makes the analysis involving the classes easier as it means that we will not have to look at methods of over/under-sampling to ensure we achieve a more equal balance. Following this, we'll now look at the distribution of the epitope lengths.
+```{r, fig.align = 'center'}
+c = ggplot(mydata, aes(nchar(epit_seq)))
+c + geom_area(stat = "bin", fill="darkred", color="darkred") +
+    ggtitle('Distribution of epitope lengths') + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    xlab("Epitope length")
+```
+This is less evenly balanced than the Class distribution. The vast majority of epitope lengths are around 15 with most of the rest being under 15. There are small amounts over 15 ranging to 30. It thus seems appropriate to use 15 as the length of our amino acid windows later on. The next observation to look at is the distribution of letters within positive and negative observations. This required more code than the others. I decided to make a separate dataframe to find the frequency of each letter. I made two long strings for the positives and negatives and used these to calculate how often a certain letter appeared corresponding with the class it was in.
+```{r}
+#function to determine the frequency as a percentage of a string
+frequency = function(string, letter)
+    return(round((100 * (str_count(string, letter))) / nchar(string), digits=2))
+
+#concatenating all positive and negative classes
+positives = paste((mydata %>% filter(Class == 1))$epit_seq, collapse = '')
+negatives = paste((mydata %>% filter(Class == -1))$epit_seq, collapse = '')
+
+#creates dataframe having necessary values for class and the unique letters
+freqdf = data.frame(Class = to_vec(for(i in 1:40) if(i <= 20) -1 else 1),
+                    letter = c(unique(strsplit(positives, "")[[1]]), unique(strsplit(positives, "")[[1]])))
+freqdf$freq = to_vec(for(i in 1:40) if(i <= 20) frequency(negatives, freqdf$letter[i]) else frequency(positives, freqdf$letter[i]))
+
+```
+Using this I could plot the results on a stacked barchart as shown below.
+```{r, fig.align= 'center'}
+library(scales)
+
+ggplot(data = freqdf, aes(x = letter, y = freq, fill = factor(Class))) + geom_bar(stat = "identity") + 
+  labs(fill = "Class")
+```
+As expected all the letters have a fairly even class distribution within themselves. The most common amino acid letter is E with L and S also being fairly prominent. Letters like C, H, M, and W are much lower than the other letters so this could indicate that they are the amino acids of least importance. Having anaylsed this, it is now time to make an extended dataset. For each amino acid in each epitope sequence I create a new row with a window centred at each amino acid letter selected. 
+```{r}
+#initialises empty vectors to use later, more efficient than building up the vector size as we go
+protein_id = character(sum(nchar(mydata$epit_seq))) 
+epitope_id = character(sum(nchar(mydata$epit_seq)))
+AA_position = numeric(sum(nchar(mydata$epit_seq)))
+AA_window = character(sum(nchar(mydata$epit_seq)))
+Class = numeric(sum(nchar(mydata$epit_seq)))
+
+#k is used to count the number of times it has looped to be used as a row index
+k = 0
+for(i in 1:nrow(mydata)) {
+  for(j in 1:nchar(mydata$epit_seq[i])) {
+    k = k + 1
+    
+    #protein_id and epitope_id is unchanged from previous dataframe
+    protein_id[k] = mydata$protein_id[i]
+    epitope_id[k] = mydata$epitope_id[i]
+    #uses initial start point and adds one as it goes through protein string
+    AA_position[k] = mydata$start_pos[i] + j - 1
+    #creates substring of TSeq_sequence centred at the relevant amino acid letter
+    AA_window[k] = str_sub(mydata$TSeq_sequence[i], mydata$start_pos[i] + j-8, mydata$start_pos[i] + j+6)
+    Class[k] = mydata$Class[i]
+  }
+}
+
+#makes a dataframe from the result 
+expanded_data = data.frame(protein_id, epitope_id, AA_position, AA_window, Class)
+#as I used TSeq there was still the possibility of there being a B, J, X, or Z
+expanded_data = expanded_data %>% filter(!str_detect(AA_window, "[BJXZ]"))
+```
+Using the AA window I create 420 new variables denoting the frequency of each letter as well as each pair of letters. This will help utilise the impact of the more prominent letters shown earlier and also show which pairs of letters appear more often.
+```{r}
+#looks at frequency of each letter 
+for(i in unique(strsplit(positives, "")[[1]])) {
+  expanded_data[[i]] = frequency(expanded_data$AA_window, i)
+}
+
+#looks at frequency of each pair of letters
+for(j in levels(interaction(unique(strsplit(positives, "")[[1]]), unique(strsplit(positives, "")[[1]]), sep=''))) {
+  expanded_data[[j]] = frequency(expanded_data$AA_window, j)
+}
+```
+Additional variables can be calculated using the AA windows. I add the entropy, molecular mass, mean hydropathy index as well as the atom content. The atom content was gained from this file [https://www.dropbox.com/s/mz8tmta5kkxp2gn/Atoms.csv]
+```{r, cache = TRUE}
+#useful library that contains relevant functions for calculations
+library(Peptides)
+
+#function that calculates the entropy of the protein
+entropy = function(row) {
+  counter = 0
+  for(i in row) {
+    if(i != 0) {
+      counter = counter + ((i/100) * log2(i/100))
+    }
+  }
+  return(-1 * counter)
+}
+
+#reads through the atom csv file and assigns the correct values to each letter
+atoms = read.csv('Atoms.csv')
+atoms[,1] = str_trim(atoms[,1])
+for(i in 2:6) {
+  counter = numeric(nrow(expanded_data))
+  for(j in 1:nrow(expanded_data)) {
+    for(k in str_split(expanded_data$AA_window[j], "")[[1]]) {
+      counter[j] = counter[j] + atoms[match(k, atoms[,1]), i]
+    }
+  }
+  expanded_data[[colnames(atoms)[i]]] = counter
+}
+  
+#assigns the entropy values
+expanded_data$Entropy = to_vec(for(i in 1:nrow(expanded_data)) entropy(expanded_data[i,6:25]))
+
+#assigns the molecular mass values
+expanded_data$molmass = to_vec(for(i in 1:nrow(expanded_data)) mw(expanded_data$AA_window[i]))
+
+#assigns the mean hydropathy index values
+expanded_data$mhi = to_vec(for(i in 1:nrow(expanded_data)) hydrophobicity(expanded_data$AA_window[i]))
+```
+At present the data has high dimensionality with 433 variables. This will take a lot of time to work with, so I decided to apply PCA in order to reduce the dimensionality of the data. I only use the numerical columns, the first 5 columns are descriptive of the data. I also scale and centre the data as there is a large range of values.
+```{r, cache = TRUE}
+expanded_data.pca = prcomp(expanded_data[, c(-1, -2, -3, -4, -5)], scale = TRUE, center = TRUE)
+```
+Having performed PCA, I decided that 95% would be a suitable threshold for the amount of explained variance. Using this I found the components that accounted for 95% of the explained variance. This reduces the data by 90 variables which isn't too substantial but is a big chunk and will help us down the line.
+```{r}
+importance = summary(expanded_data.pca)$importance[2,]
+num_components = length(to_vec(for(i in cumsum(importance)) if(i <= 0.95) i))
+#turn result back into a dataframe using the new number of variables
+expanded_data.pca = data.frame(expanded_data.pca$x[,1:num_components])
+```
+With the data in the form that we would like it in, we can now begin to build models around it. The first step is to divide the data into training and holdout. I decided that a 25/75 split was appropriate for this data.
+```{r}
+library(reticulate)
+
+train_index = round(0.75 * nrow(expanded_data.pca))
+#loops until all unique protein ids are grouped with each other
+if(identical(expanded_data$protein_id[train_index], expanded_data$protein_id[train_index + 1])) {
+  while(identical(expanded_data$protein_id[train_index], expanded_data$protein_id[train_index + 1])) {
+    train_index = train_index + 1
+  }
+}
+
+#initialises python and converts necessary variables into python variables
+use_python("/anaconda/bin/python")
+
+X = r_to_py(expanded_data.pca)
+py_train_ind = r_to_py(train_index)
+y = r_to_py(expanded_data$Class)
+```
+I decided to use Python for the modelling stage. Due to computational power and time I decided to test the performance of 3 models: Logistic Regression, Support Vector Machine Classifier, and Random Forest Classifier. I also used the base settings as, again, due to computational power and time performing extensive cross validation for parameter tuning was too much.
+```{python, cache=TRUE}
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import cross_val_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+
+#split up the X variables into train and holdout
+X_train = r.X.iloc[:int(r.py_train_ind) - 1,:]
+X_holdout = r.X.iloc[int(r.py_train_ind):,:]
+
+#split up the y variable into train and holdout
+y_train = np.array(r.y[:int(r.py_train_ind) - 1])
+y_holdout = np.array(r.y[int(r.py_train_ind):])
+
+#create Logistic Regression model
+clf1 = LogisticRegression(multi_class='ovr',
+                          solver='newton-cg',
+                          random_state=1)
+
+#train LogReg model
+clf1.fit(X_train, y_train)
+
+#create Support Vector Classifier
+clf2 = SVC(random_state=1)
+
+#train SVC
+clf2.fit(X_train, y_train)
+
+#create Random Forest Classifier
+clf3 = RandomForestClassifier(random_state=1)
+
+#train RFC
+clf3.fit(X_train, y_train)
+
+print("Model accuracy \n" +
+      "Logistic Regression: {}\n".format(cross_val_score(clf1, X_holdout, y_holdout, cv=5).mean()) +
+      "Support Vector Classifier: {}\n".format(cross_val_score(clf2, X_holdout, y_holdout, cv=5).mean()) +
+      "Random Forest Classifier: {}\n".format(cross_val_score(clf3, X_holdout, y_holdout, cv=5).mean()))
+```
+At the time of running this, the Logistic Regression model performed best with 60% accuracy. I used cross validation in order to get this accuracy score, and used a value of 5 for number of splits used. This could have been higher with sufficient parameter tuning of the models, but all things considered it is a fairly decent accuracy score given the nature of our data.
